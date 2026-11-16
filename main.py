@@ -297,11 +297,24 @@ async def set_tickets_remaining(message: Message):
     try:
         with db() as conn:
             countdown = conn.execute(
-                "SELECT title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
+                "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
                 (row["chat_id"], row["message_id"])
             ).fetchone()
+            # Если сохранённая привязка устарела, автоматически берём последний таймер этого канала.
+            if not countdown:
+                countdown = conn.execute(
+                    "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                    (row["chat_id"],)
+                ).fetchone()
+                if countdown:
+                    conn.execute(
+                        "UPDATE tickets_counter SET message_id = ? WHERE id = 1",
+                        (countdown["message_id"],)
+                    )
+                    row = dict(row)
+                    row["message_id"] = countdown["message_id"]
         if not countdown:
-            await message.answer("Таймер не найден. Создай новый таймер и снова привяжи счётчик командой /tickets_post.")
+            await message.answer("Не нашёл таймер в канале. Создай /countdown, затем повтори /tickets_post.")
             return
         target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
         timer_text = (
@@ -314,7 +327,7 @@ async def set_tickets_remaining(message: Message):
         )
     except Exception as exc:
         logger.warning("Tickets message update failed: %s", exc)
-        await message.answer("Не удалось обновить публичный счётчик. Возможно, сообщение удалено.")
+        await message.answer(f"Не удалось обновить сообщение в канале. Ошибка Telegram: {exc}")
         return
 
     with db() as conn:
@@ -349,11 +362,24 @@ async def set_tickets_total(message: Message):
     try:
         with db() as conn:
             countdown = conn.execute(
-                "SELECT title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
+                "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
                 (row["chat_id"], row["message_id"])
             ).fetchone()
+            # Если сохранённая привязка устарела, автоматически берём последний таймер этого канала.
+            if not countdown:
+                countdown = conn.execute(
+                    "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                    (row["chat_id"],)
+                ).fetchone()
+                if countdown:
+                    conn.execute(
+                        "UPDATE tickets_counter SET message_id = ? WHERE id = 1",
+                        (countdown["message_id"],)
+                    )
+                    row = dict(row)
+                    row["message_id"] = countdown["message_id"]
         if not countdown:
-            await message.answer("Таймер не найден. Создай новый таймер и снова привяжи счётчик командой /tickets_post.")
+            await message.answer("Не нашёл таймер в канале. Создай /countdown, затем повтори /tickets_post.")
             return
         target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
         timer_text = (
