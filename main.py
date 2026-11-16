@@ -206,7 +206,7 @@ async def get_tickets_config():
 
 
 def format_tickets(remaining: int, total: int) -> str:
-    return f"Осталось {remaining} из {total} путёвок"
+    return f"осталось {remaining} из {total} путёвок"
 
 
 async def is_group_admin(chat_id: int, user_id: int) -> bool:
@@ -319,7 +319,7 @@ async def set_tickets_remaining(message: Message):
 
     with db() as conn:
         conn.execute("UPDATE tickets_counter SET remaining = ? WHERE id = 1", (remaining,))
-    await message.answer(f"Готово. Осталось {remaining} из {row['total']} путёвок.")
+    await message.answer(f"Готово. осталось {remaining} из {row['total']} путёвок.")
 
 
 @dp.message(Command("tickets_total"))
