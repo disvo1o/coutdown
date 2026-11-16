@@ -175,7 +175,7 @@ async def create_countdown(message: Message):
     with db() as conn:
         cursor = conn.execute(
             "INSERT INTO countdowns (chat_id, message_id, title, target_at, created_by) VALUES (?, ?, ?, ?, ?)",
-            (message.chat.id, sent.message_id, title, target.isoformat(), message.from_user.id)
+            (message.chat.id, sent.message_id, title, target.isoformat(), message.from_user.id if message.from_user else None)
         )
         countdown_id = cursor.lastrowid
         tickets = conn.execute(
