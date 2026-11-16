@@ -335,11 +335,11 @@ async def set_tickets_remaining(message: Message):
                 continue
             target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
             timer_text = (
-                f"🎉 <b>{html.escape(countdown['title'])}</b>\\n\\nСобытие уже началось!"
+                f"🎉 <b>{html.escape(countdown['title'])}</b>\n\nСобытие уже началось!"
                 if countdown["finished"] else format_countdown(countdown["title"], target)
             )
             await bot.edit_message_text(
-                timer_text + f"\\n\\n🎟 <b>{format_tickets(remaining, row['total'])}</b>\\n\\n{TICKETS_LINK}",
+                timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>\n\n{TICKETS_LINK}",
                 chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML",
                 link_preview_options=NO_LINK_PREVIEW
             )
@@ -356,7 +356,7 @@ async def set_tickets_remaining(message: Message):
             )
     result = f"Обновлено чатов/каналов: {len(updated)}."
     if errors:
-        result += "\\nНе удалось обновить:\\n" + "\\n".join(errors)
+        result += "\nНе удалось обновить:\n" + "\n".join(errors)
     await message.answer(result)
 
 
@@ -410,11 +410,11 @@ async def set_tickets_total(message: Message):
                 continue
             target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
             timer_text = (
-                f"🎉 <b>{html.escape(countdown['title'])}</b>\\n\\nСобытие уже началось!"
+                f"🎉 <b>{html.escape(countdown['title'])}</b>\n\nСобытие уже началось!"
                 if countdown["finished"] else format_countdown(countdown["title"], target)
             )
             await bot.edit_message_text(
-                timer_text + f"\\n\\n🎟 <b>{format_tickets(row['remaining'], total)}</b>\\n\\n{TICKETS_LINK}",
+                timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>\n\n{TICKETS_LINK}",
                 chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML",
                 link_preview_options=NO_LINK_PREVIEW
             )
@@ -431,7 +431,7 @@ async def set_tickets_total(message: Message):
             )
     result = f"Вместимость обновлена в чатов/каналов: {len(updated)}."
     if errors:
-        result += "\\nНе удалось обновить:\\n" + "\\n".join(errors)
+        result += "\nНе удалось обновить:\n" + "\n".join(errors)
     await message.answer(result)
 
 
@@ -452,7 +452,7 @@ async def tickets_status(message: Message):
             except Exception:
                 label = str(row["chat_id"])
             lines.append(f"{label}: {format_tickets(row['remaining'], row['total'])}")
-    await message.answer("\\n".join(lines) if lines else "Нет привязанных чатов, где у тебя есть права администратора.")
+    await message.answer("\n".join(lines) if lines else "Нет привязанных чатов, где у тебя есть права администратора.")
 
 
 @dp.message(Command("list"))
