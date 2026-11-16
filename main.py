@@ -17,7 +17,7 @@ TOKEN = os.getenv("BOT_TOKEN")
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow"))
 DB_PATH = os.getenv("DATABASE_PATH", "countdowns.db")
 UPDATE_INTERVAL = 5  # Telegram limits message edits; 5 seconds keeps the countdown reliable.
-TICKETS_LINK = '<a href="https://t.me/mrpingcamp">Путёвки</a>'
+TICKETS_LINK = '<a href="https://t.me/mrpingcamp">путёвки</a>'
 NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 logging.basicConfig(level=logging.INFO)
