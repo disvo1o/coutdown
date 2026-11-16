@@ -135,7 +135,6 @@ async def create_countdown(message: Message):
         )
         countdown_id = cursor.lastrowid
 
-    await message.reply(f"Готово! Отсчёт создан. ID: <code>{countdown_id}</code>")
 
 
 @dp.message(Command("list"))
