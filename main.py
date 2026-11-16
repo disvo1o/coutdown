@@ -190,7 +190,7 @@ async def create_countdown(message: Message):
             )
     if tickets:
         await bot.edit_message_text(
-            format_countdown(title, target) + f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>",
+            format_countdown(title, target) + f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>{link}",
             chat_id=message.chat.id, message_id=sent.message_id, parse_mode="HTML"
         )
 
@@ -264,7 +264,7 @@ async def create_tickets_post(message: Message):
             pass
     target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
     combined = format_countdown(countdown["title"], target)
-    combined += f"\n\n🎟 <b>{format_tickets(remaining, total)}</b>"
+    combined += f"\n\n🎟 <b>{format_tickets(remaining, total)}</b>{link}"
     await bot.edit_message_text(
         combined, chat_id=message.chat.id, message_id=countdown["message_id"], parse_mode="HTML"
     )
@@ -307,7 +307,7 @@ async def set_tickets_remaining(message: Message):
             if countdown["finished"] else format_countdown(countdown["title"], target)
         )
         await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>",
+            timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>{link}",
             chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
         )
     except Exception as exc:
@@ -359,7 +359,7 @@ async def set_tickets_total(message: Message):
             if countdown["finished"] else format_countdown(countdown["title"], target)
         )
         await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>",
+            timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>{link}",
             chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
         )
     except Exception as exc:
@@ -464,7 +464,7 @@ async def countdown_worker():
                     else:
                         text = format_countdown(row["title"], target)
                     if tickets:
-                        text += f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>"
+                        text += f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>{link}"
                     await bot.edit_message_text(
                         text, chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
                     )
