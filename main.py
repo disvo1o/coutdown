@@ -64,6 +64,18 @@ def init_db():
                 total INTEGER NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tickets_counters (
+                chat_id INTEGER PRIMARY KEY,
+                message_id INTEGER NOT NULL,
+                remaining INTEGER NOT NULL,
+                total INTEGER NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO tickets_counters (chat_id, message_id, remaining, total)
+            SELECT chat_id, message_id, remaining, total FROM tickets_counter
+        """)
 
 
 def russian_plural(number: int, forms: tuple[str, str, str]) -> str:
@@ -181,11 +193,11 @@ async def create_countdown(message: Message):
         )
         countdown_id = cursor.lastrowid
         tickets = conn.execute(
-            "SELECT remaining, total FROM tickets_counter WHERE id = 1 AND chat_id = ?",
+            "SELECT remaining, total FROM tickets_counters WHERE chat_id = ?",
             (message.chat.id,)
         ).fetchone()
         if tickets:
-            conn.execute("UPDATE tickets_counter SET message_id = ? WHERE id = 1", (sent.message_id,))
+            conn.execute("UPDATE tickets_counters SET message_id = ? WHERE chat_id = ?", (sent.message_id, message.chat.id))
             conn.execute(
                 "UPDATE countdowns SET finished = 1 WHERE chat_id = ? AND id != ? AND finished = 0",
                 (message.chat.id, countdown_id)
@@ -201,8 +213,8 @@ async def create_countdown(message: Message):
 async def get_tickets_config():
     with db() as conn:
         return conn.execute(
-            "SELECT chat_id, message_id, remaining, total FROM tickets_counter WHERE id = 1"
-        ).fetchone()
+            "SELECT chat_id, message_id, remaining, total FROM tickets_counters ORDER BY chat_id"
+        ).fetchall()
 
 
 def format_tickets(remaining: int, total: int) -> str:
@@ -245,18 +257,19 @@ async def create_tickets_post(message: Message):
             await message.answer("Сначала создай таймер командой /countdown, затем отправь /tickets_post.")
             return
         existing = conn.execute(
-            "SELECT chat_id, message_id, remaining, total FROM tickets_counter WHERE id = 1"
+            "SELECT message_id, remaining, total FROM tickets_counters WHERE chat_id = ?",
+            (message.chat.id,)
         ).fetchone()
-        if existing and existing["chat_id"] == message.chat.id:
+        if existing:
             remaining, total = existing["remaining"], existing["total"]
             old_message_id = existing["message_id"]
         else:
             remaining, total, old_message_id = 48, 100, None
         conn.execute(
-            """INSERT INTO tickets_counter (id, chat_id, message_id, remaining, total)
-               VALUES (1, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET chat_id=excluded.chat_id,
-               message_id=excluded.message_id, remaining=excluded.remaining, total=excluded.total""",
+            """INSERT INTO tickets_counters (chat_id, message_id, remaining, total)
+               VALUES (?, ?, ?, ?)
+               ON CONFLICT(chat_id) DO UPDATE SET message_id=excluded.message_id,
+               remaining=excluded.remaining, total=excluded.total""",
             (message.chat.id, countdown["message_id"], remaining, total)
         )
     if old_message_id and old_message_id != countdown["message_id"]:
@@ -281,58 +294,70 @@ async def set_tickets_remaining(message: Message):
         await message.answer("Использование: /tickets 48")
         return
 
-    row = await get_tickets_config()
-    if not row:
-        await message.answer("Сначала создай публичный счётчик командой /tickets_post в общем чате.")
-        return
-    if not await is_group_admin(row["chat_id"], message.from_user.id):
-        await message.answer("Изменять количество путёвок могут только администраторы лагерного чата.")
+    counters = await get_tickets_config()
+    if not counters:
+        await message.answer("Сначала создай таймер и привяжи счётчик командой /tickets_post в каждом нужном чате или канале.")
         return
 
     remaining = int(parts[1])
-    if remaining < 0 or remaining > row["total"]:
-        await message.answer(f"Введи число от 0 до {row['total']}.")
+    eligible = [row for row in counters if await is_group_admin(row["chat_id"], message.from_user.id)]
+    if not eligible:
+        await message.answer("Изменять количество путёвок могут только администраторы привязанных чатов и каналов.")
+        return
+    if any(remaining < 0 or remaining > row["total"] for row in eligible):
+        max_total = min(row["total"] for row in eligible)
+        await message.answer(f"Введи число от 0 до {max_total} — это допустимо для всех привязанных чатов.")
         return
 
-    try:
-        with db() as conn:
-            countdown = conn.execute(
-                "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
-                (row["chat_id"], row["message_id"])
-            ).fetchone()
-            # Если сохранённая привязка устарела, автоматически берём последний таймер этого канала.
-            if not countdown:
+    updated = []
+    errors = []
+    for row in eligible:
+        try:
+            with db() as conn:
                 countdown = conn.execute(
-                    "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
-                    (row["chat_id"],)
+                    "SELECT title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
+                    (row["chat_id"], row["message_id"])
                 ).fetchone()
-                if countdown:
-                    conn.execute(
-                        "UPDATE tickets_counter SET message_id = ? WHERE id = 1",
-                        (countdown["message_id"],)
-                    )
-                    row = dict(row)
-                    row["message_id"] = countdown["message_id"]
-        if not countdown:
-            await message.answer("Не нашёл таймер в канале. Создай /countdown, затем повтори /tickets_post.")
-            return
-        target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
-        timer_text = (
-            f"🎉 <b>{html.escape(countdown['title'])}</b>\n\nСобытие уже началось!"
-            if countdown["finished"] else format_countdown(countdown["title"], target)
-        )
-        await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>\n\n{TICKETS_LINK}",
-            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
-        )
-    except Exception as exc:
-        logger.warning("Tickets message update failed: %s", exc)
-        await message.answer(f"Не удалось обновить сообщение в канале. Ошибка Telegram: {exc}")
-        return
+                if not countdown:
+                    countdown = conn.execute(
+                        "SELECT title, target_at, finished, message_id FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                        (row["chat_id"],)
+                    ).fetchone()
+                    if countdown:
+                        conn.execute(
+                            "UPDATE tickets_counters SET message_id = ? WHERE chat_id = ?",
+                            (countdown["message_id"], row["chat_id"])
+                        )
+                        row = dict(row)
+                        row["message_id"] = countdown["message_id"]
+            if not countdown:
+                errors.append(f"{row['chat_id']}: таймер не найден")
+                continue
+            target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
+            timer_text = (
+                f"🎉 <b>{html.escape(countdown['title'])}</b>\\n\\nСобытие уже началось!"
+                if countdown["finished"] else format_countdown(countdown["title"], target)
+            )
+            await bot.edit_message_text(
+                timer_text + f"\\n\\n🎟 <b>{format_tickets(remaining, row['total'])}</b>\\n\\n{TICKETS_LINK}",
+                chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML",
+                link_preview_options=NO_LINK_PREVIEW
+            )
+            updated.append(row["chat_id"])
+        except Exception as exc:
+            logger.warning("Tickets update failed for chat %s: %s", row["chat_id"], exc)
+            errors.append(f"{row['chat_id']}: {exc}")
 
-    with db() as conn:
-        conn.execute("UPDATE tickets_counter SET remaining = ? WHERE id = 1", (remaining,))
-    await message.answer(f"Готово. осталось {remaining} из {row['total']} путёвок.")
+    if updated:
+        with db() as conn:
+            conn.executemany(
+                "UPDATE tickets_counters SET remaining = ? WHERE chat_id = ?",
+                [(remaining, chat_id) for chat_id in updated]
+            )
+    result = f"Обновлено чатов/каналов: {len(updated)}."
+    if errors:
+        result += "\\nНе удалось обновить:\\n" + "\\n".join(errors)
+    await message.answer(result)
 
 
 @dp.message(Command("tickets_total"))
@@ -344,74 +369,90 @@ async def set_tickets_total(message: Message):
         await message.answer("Использование: /tickets_total 100")
         return
 
-    row = await get_tickets_config()
-    if not row:
-        await message.answer("Сначала создай публичный счётчик командой /tickets_post в общем чате.")
-        return
-    if not await is_group_admin(row["chat_id"], message.from_user.id):
-        await message.answer("Изменять вместимость могут только администраторы лагерного чата.")
+    counters = await get_tickets_config()
+    if not counters:
+        await message.answer("Сначала привяжи счётчик командой /tickets_post в нужных чатах или каналах.")
         return
 
     total = int(parts[1])
-    if total < 1 or total < row["remaining"]:
-        await message.answer(
-            f"Общая вместимость должна быть не меньше остатка ({row['remaining']}) и минимум 1."
-        )
+    eligible = [row for row in counters if await is_group_admin(row["chat_id"], message.from_user.id)]
+    if not eligible:
+        await message.answer("Изменять вместимость могут только администраторы привязанных чатов и каналов.")
+        return
+    if total < 1 or any(total < row["remaining"] for row in eligible):
+        min_remaining = max(row["remaining"] for row in eligible)
+        await message.answer(f"Общая вместимость должна быть не меньше остатка ({min_remaining}) и минимум 1.")
         return
 
-    try:
-        with db() as conn:
-            countdown = conn.execute(
-                "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
-                (row["chat_id"], row["message_id"])
-            ).fetchone()
-            # Если сохранённая привязка устарела, автоматически берём последний таймер этого канала.
-            if not countdown:
+    updated = []
+    errors = []
+    for row in eligible:
+        try:
+            with db() as conn:
                 countdown = conn.execute(
-                    "SELECT id, message_id, title, target_at, finished FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
-                    (row["chat_id"],)
+                    "SELECT title, target_at, finished FROM countdowns WHERE chat_id = ? AND message_id = ?",
+                    (row["chat_id"], row["message_id"])
                 ).fetchone()
-                if countdown:
-                    conn.execute(
-                        "UPDATE tickets_counter SET message_id = ? WHERE id = 1",
-                        (countdown["message_id"],)
-                    )
-                    row = dict(row)
-                    row["message_id"] = countdown["message_id"]
-        if not countdown:
-            await message.answer("Не нашёл таймер в канале. Создай /countdown, затем повтори /tickets_post.")
-            return
-        target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
-        timer_text = (
-            f"🎉 <b>{html.escape(countdown['title'])}</b>\n\nСобытие уже началось!"
-            if countdown["finished"] else format_countdown(countdown["title"], target)
-        )
-        await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>\n\n{TICKETS_LINK}",
-            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
-        )
-    except Exception as exc:
-        logger.warning("Tickets total update failed: %s", exc)
-        await message.answer("Не удалось обновить публичный счётчик. Возможно, сообщение удалено.")
-        return
+                if not countdown:
+                    countdown = conn.execute(
+                        "SELECT title, target_at, finished, message_id FROM countdowns WHERE chat_id = ? ORDER BY id DESC LIMIT 1",
+                        (row["chat_id"],)
+                    ).fetchone()
+                    if countdown:
+                        conn.execute(
+                            "UPDATE tickets_counters SET message_id = ? WHERE chat_id = ?",
+                            (countdown["message_id"], row["chat_id"])
+                        )
+                        row = dict(row)
+                        row["message_id"] = countdown["message_id"]
+            if not countdown:
+                errors.append(f"{row['chat_id']}: таймер не найден")
+                continue
+            target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
+            timer_text = (
+                f"🎉 <b>{html.escape(countdown['title'])}</b>\\n\\nСобытие уже началось!"
+                if countdown["finished"] else format_countdown(countdown["title"], target)
+            )
+            await bot.edit_message_text(
+                timer_text + f"\\n\\n🎟 <b>{format_tickets(row['remaining'], total)}</b>\\n\\n{TICKETS_LINK}",
+                chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML",
+                link_preview_options=NO_LINK_PREVIEW
+            )
+            updated.append(row["chat_id"])
+        except Exception as exc:
+            logger.warning("Tickets total update failed for chat %s: %s", row["chat_id"], exc)
+            errors.append(f"{row['chat_id']}: {exc}")
 
-    with db() as conn:
-        conn.execute("UPDATE tickets_counter SET total = ? WHERE id = 1", (total,))
-    await message.answer(f"Готово. Вместимость теперь {total} путёвок.")
+    if updated:
+        with db() as conn:
+            conn.executemany(
+                "UPDATE tickets_counters SET total = ? WHERE chat_id = ?",
+                [(total, chat_id) for chat_id in updated]
+            )
+    result = f"Вместимость обновлена в чатов/каналов: {len(updated)}."
+    if errors:
+        result += "\\nНе удалось обновить:\\n" + "\\n".join(errors)
+    await message.answer(result)
 
 
 @dp.message(Command("tickets_status"))
 async def tickets_status(message: Message):
     if message.chat.type != "private" or not message.from_user:
         return
-    row = await get_tickets_config()
-    if not row:
-        await message.answer("Публичный счётчик ещё не создан.")
+    counters = await get_tickets_config()
+    if not counters:
+        await message.answer("Публичные счётчики ещё не созданы.")
         return
-    if not await is_group_admin(row["chat_id"], message.from_user.id):
-        await message.answer("Эта команда доступна только администраторам лагерного чата.")
-        return
-    await message.answer(format_tickets(row["remaining"], row["total"]))
+    lines = []
+    for row in counters:
+        if await is_group_admin(row["chat_id"], message.from_user.id):
+            try:
+                chat = await bot.get_chat(row["chat_id"])
+                label = chat.title or str(row["chat_id"])
+            except Exception:
+                label = str(row["chat_id"])
+            lines.append(f"{label}: {format_tickets(row['remaining'], row['total'])}")
+    await message.answer("\\n".join(lines) if lines else "Нет привязанных чатов, где у тебя есть права администратора.")
 
 
 @dp.message(Command("list"))
@@ -482,7 +523,7 @@ async def countdown_worker():
                 try:
                     with db() as conn:
                         tickets = conn.execute(
-                            "SELECT remaining, total FROM tickets_counter WHERE id = 1 AND chat_id = ? AND message_id = ?",
+                            "SELECT remaining, total FROM tickets_counters WHERE chat_id = ? AND message_id = ?",
                             (row["chat_id"], row["message_id"])
                         ).fetchone()
                     if now >= target:
