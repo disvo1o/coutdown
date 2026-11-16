@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import html
 import os
 import sqlite3
 from contextlib import contextmanager
@@ -60,8 +61,9 @@ def format_countdown(title: str, target: datetime) -> str:
     hours, remainder = divmod(remainder, 3600)
     minutes, _ = divmod(remainder, 60)
 
+    safe_title = html.escape(title)
     return (
-        f"⏳ <b>{title}</b>\n\n"
+        f"⏳ <b>{safe_title}</b>\n\n"
         f"До события осталось:\n"
         f"<b>{days} дн. {hours:02d} ч. {minutes:02d} мин.</b>\n\n"
         f"📅 {target.strftime('%d.%m.%Y в %H:%M')} МСК"
@@ -153,7 +155,7 @@ async def list_countdowns(message: Message):
     lines = ["⏳ <b>Активные отсчёты:</b>"]
     for row in rows:
         target = datetime.fromisoformat(row["target_at"]).astimezone(TIMEZONE)
-        lines.append(f"\n<b>#{row['id']}</b> — {row['title']}\n📅 {target:%d.%m.%Y %H:%M} МСК")
+        lines.append(f"\n<b>#{row['id']}</b> — {html.escape(row['title'])}\n📅 {target:%d.%m.%Y %H:%M} МСК")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -205,7 +207,7 @@ async def countdown_worker():
                 try:
                     if now >= target:
                         await bot.edit_message_text(
-                            f"🎉 <b>Время пришло!</b>\n\n<b>{row['title']}</b>\n"
+                            f"🎉 <b>Время пришло!</b>\n\n<b>{html.escape(row['title'])}</b>\n"
                             f"Событие уже началось!",
                             chat_id=row["chat_id"],
                             message_id=row["message_id"],
