@@ -11,11 +11,12 @@ from zoneinfo import ZoneInfo
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
+from aiogram.exceptions import TelegramRetryAfter
 
 TOKEN = os.getenv("BOT_TOKEN")
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow"))
 DB_PATH = os.getenv("DATABASE_PATH", "countdowns.db")
-UPDATE_INTERVAL = 1
+UPDATE_INTERVAL = 5  # Telegram limits message edits; 5 seconds keeps the countdown reliable.
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,17 +55,35 @@ def init_db():
         """)
 
 
+def russian_plural(number: int, forms: tuple[str, str, str]) -> str:
+    n = abs(number) % 100
+    if 11 <= n <= 14:
+        form = forms[2]
+    else:
+        n %= 10
+        if n == 1:
+            form = forms[0]
+        elif 2 <= n <= 4:
+            form = forms[1]
+        else:
+            form = forms[2]
+    return f"{number} {form}"
+
+
 def format_countdown(title: str, target: datetime) -> str:
     now = datetime.now(TIMEZONE)
-    seconds = max(0, int((target - now).total_seconds()))
-    days, remainder = divmod(seconds, 86400)
+    total_seconds = max(0, int((target - now).total_seconds()))
+    days, remainder = divmod(total_seconds, 86400)
     hours, remainder = divmod(remainder, 3600)
     minutes, seconds = divmod(remainder, 60)
 
     safe_title = html.escape(title)
     return (
-        f"<b>{safe_title}</b>\n\n"
-        f"{days} дней {hours:02d} часов {minutes:02d} минут {seconds:02d} секунд"
+        f"<b>{safe_title}</b>\\n\\n"
+        f"{russian_plural(days, ('день', 'дня', 'дней'))} "
+        f"{russian_plural(hours, ('час', 'часа', 'часов'))} "
+        f"{russian_plural(minutes, ('минута', 'минуты', 'минут'))} "
+        f"{russian_plural(seconds, ('секунда', 'секунды', 'секунд'))}"
     )
 
 
@@ -217,6 +236,13 @@ async def countdown_worker():
                             message_id=row["message_id"],
                             parse_mode="HTML"
                         )
+                except TelegramRetryAfter as exc:
+                    # Respect Telegram's flood-control response instead of retrying every tick.
+                    logger.warning(
+                        "Telegram rate limit for countdown %s; retrying after %s seconds",
+                        row["id"], exc.retry_after
+                    )
+                    await asyncio.sleep(exc.retry_after)
                 except Exception as exc:
                     # A deleted message or a removed bot should not stop other countdowns.
                     logger.warning("Countdown %s update failed: %s", row["id"], exc)
