@@ -10,13 +10,15 @@ from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import LinkPreviewOptions, Message
 from aiogram.exceptions import TelegramRetryAfter
 
 TOKEN = os.getenv("BOT_TOKEN")
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow"))
 DB_PATH = os.getenv("DATABASE_PATH", "countdowns.db")
 UPDATE_INTERVAL = 5  # Telegram limits message edits; 5 seconds keeps the countdown reliable.
+TICKETS_LINK = '<a href="https://t.me/mrpingcamp">Путёвки</a>'
+NO_LINK_PREVIEW = LinkPreviewOptions(is_disabled=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -171,7 +173,7 @@ async def create_countdown(message: Message):
         await message.reply("Эта дата уже прошла. Укажи дату и время в будущем.")
         return
 
-    sent = await message.answer(format_countdown(title, target), parse_mode="HTML")
+    sent = await message.answer(format_countdown(title, target), parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW)
     with db() as conn:
         cursor = conn.execute(
             "INSERT INTO countdowns (chat_id, message_id, title, target_at, created_by) VALUES (?, ?, ?, ?, ?)",
@@ -190,8 +192,8 @@ async def create_countdown(message: Message):
             )
     if tickets:
         await bot.edit_message_text(
-            format_countdown(title, target) + f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>{link}",
-            chat_id=message.chat.id, message_id=sent.message_id, parse_mode="HTML"
+            format_countdown(title, target) + f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>\n\n{TICKETS_LINK}",
+            chat_id=message.chat.id, message_id=sent.message_id, parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
         )
 
 
@@ -264,9 +266,9 @@ async def create_tickets_post(message: Message):
             pass
     target = datetime.fromisoformat(countdown["target_at"]).astimezone(TIMEZONE)
     combined = format_countdown(countdown["title"], target)
-    combined += f"\n\n🎟 <b>{format_tickets(remaining, total)}</b>{link}"
+    combined += f"\n\n🎟 <b>{format_tickets(remaining, total)}</b>\n\n{TICKETS_LINK}"
     await bot.edit_message_text(
-        combined, chat_id=message.chat.id, message_id=countdown["message_id"], parse_mode="HTML"
+        combined, chat_id=message.chat.id, message_id=countdown["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
     )
 
 
@@ -307,8 +309,8 @@ async def set_tickets_remaining(message: Message):
             if countdown["finished"] else format_countdown(countdown["title"], target)
         )
         await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>{link}",
-            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
+            timer_text + f"\n\n🎟 <b>{format_tickets(remaining, row['total'])}</b>\n\n{TICKETS_LINK}",
+            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
         )
     except Exception as exc:
         logger.warning("Tickets message update failed: %s", exc)
@@ -359,8 +361,8 @@ async def set_tickets_total(message: Message):
             if countdown["finished"] else format_countdown(countdown["title"], target)
         )
         await bot.edit_message_text(
-            timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>{link}",
-            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
+            timer_text + f"\n\n🎟 <b>{format_tickets(row['remaining'], total)}</b>\n\n{TICKETS_LINK}",
+            chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
         )
     except Exception as exc:
         logger.warning("Tickets total update failed: %s", exc)
@@ -464,9 +466,9 @@ async def countdown_worker():
                     else:
                         text = format_countdown(row["title"], target)
                     if tickets:
-                        text += f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>{link}"
+                        text += f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>\n\n{TICKETS_LINK}"
                     await bot.edit_message_text(
-                        text, chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
+                        text, chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML", link_preview_options=NO_LINK_PREVIEW
                     )
                 except TelegramRetryAfter as exc:
                     # Respect Telegram's flood-control response instead of retrying every tick.
