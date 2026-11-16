@@ -15,7 +15,7 @@ from aiogram.types import Message
 TOKEN = os.getenv("BOT_TOKEN")
 TIMEZONE = ZoneInfo(os.getenv("TIMEZONE", "Europe/Moscow"))
 DB_PATH = os.getenv("DATABASE_PATH", "countdowns.db")
-UPDATE_INTERVAL = 60
+UPDATE_INTERVAL = 1
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -59,14 +59,12 @@ def format_countdown(title: str, target: datetime) -> str:
     seconds = max(0, int((target - now).total_seconds()))
     days, remainder = divmod(seconds, 86400)
     hours, remainder = divmod(remainder, 3600)
-    minutes, _ = divmod(remainder, 60)
+    minutes, seconds = divmod(remainder, 60)
 
     safe_title = html.escape(title)
     return (
-        f"⏳ <b>{safe_title}</b>\n\n"
-        f"До события осталось:\n"
-        f"<b>{days} дн. {hours:02d} ч. {minutes:02d} мин.</b>\n\n"
-        f"📅 {target.strftime('%d.%m.%Y в %H:%M')} МСК"
+        f"<b>{safe_title}</b>\n\n"
+        f"{days} дней {hours:02d} часов {minutes:02d} минут {seconds:02d} секунд"
     )
 
 
@@ -144,7 +142,7 @@ async def create_countdown(message: Message):
 async def list_countdowns(message: Message):
     with db() as conn:
         rows = conn.execute(
-            "SELECT id, title, target_at FROM countdowns WHERE chat_id = ? AND finished = 0 ORDER BY target_at",
+            "SELECT id, title FROM countdowns WHERE chat_id = ? AND finished = 0 ORDER BY target_at",
             (message.chat.id,)
         ).fetchall()
 
@@ -154,8 +152,7 @@ async def list_countdowns(message: Message):
 
     lines = ["⏳ <b>Активные отсчёты:</b>"]
     for row in rows:
-        target = datetime.fromisoformat(row["target_at"]).astimezone(TIMEZONE)
-        lines.append(f"\n<b>#{row['id']}</b> — {html.escape(row['title'])}\n📅 {target:%d.%m.%Y %H:%M} МСК")
+        lines.append(f"\n<b>#{row['id']}</b> — {html.escape(row['title'])}")
     await message.answer("\n".join(lines), parse_mode="HTML")
 
 
@@ -207,8 +204,7 @@ async def countdown_worker():
                 try:
                     if now >= target:
                         await bot.edit_message_text(
-                            f"🎉 <b>Время пришло!</b>\n\n<b>{html.escape(row['title'])}</b>\n"
-                            f"Событие уже началось!",
+                            f"🎉 <b>{html.escape(row['title'])}</b>\n\nСобытие уже началось!",
                             chat_id=row["chat_id"],
                             message_id=row["message_id"],
                             parse_mode="HTML"
