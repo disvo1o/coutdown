@@ -2,11 +2,12 @@ import asyncio
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from aiogram import Bot, Dispatcher, F
+from aiogram import Bot, Dispatcher
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
@@ -22,10 +23,18 @@ bot = Bot(token=TOKEN) if TOKEN else None
 dp = Dispatcher()
 
 
+@contextmanager
 def db():
     connection = sqlite3.connect(DB_PATH)
     connection.row_factory = sqlite3.Row
-    return connection
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
 
 
 def init_db():
