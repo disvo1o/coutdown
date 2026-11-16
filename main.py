@@ -439,13 +439,13 @@ async def countdown_worker():
                             (row["chat_id"], row["message_id"])
                         ).fetchone()
                     if now >= target:
-                        text = f"🎉 <b>{html.escape(row['title'])}</b>\\n\\nСобытие уже началось!"
+                        text = f"🎉 <b>{html.escape(row['title'])}</b>\n\nСобытие уже началось!"
                         with db() as conn:
                             conn.execute("UPDATE countdowns SET finished = 1 WHERE id = ?", (row["id"],))
                     else:
                         text = format_countdown(row["title"], target)
                     if tickets:
-                        text += f"\\n\\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>"
+                        text += f"\n\n🎟 <b>{format_tickets(tickets['remaining'], tickets['total'])}</b>"
                     await bot.edit_message_text(
                         text, chat_id=row["chat_id"], message_id=row["message_id"], parse_mode="HTML"
                     )
