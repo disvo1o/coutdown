@@ -53,6 +53,15 @@ def init_db():
                 finished INTEGER NOT NULL DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tickets_counter (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                chat_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                remaining INTEGER NOT NULL,
+                total INTEGER NOT NULL
+            )
+        """)
 
 
 def russian_plural(number: int, forms: tuple[str, str, str]) -> str:
@@ -154,6 +163,148 @@ async def create_countdown(message: Message):
         )
         countdown_id = cursor.lastrowid
 
+
+
+async def get_tickets_config():
+    with db() as conn:
+        return conn.execute(
+            "SELECT chat_id, message_id, remaining, total FROM tickets_counter WHERE id = 1"
+        ).fetchone()
+
+
+def format_tickets(remaining: int, total: int) -> str:
+    return f"Осталось {remaining} из {total} путёвок"
+
+
+async def is_group_admin(chat_id: int, user_id: int) -> bool:
+    try:
+        member = await bot.get_chat_member(chat_id, user_id)
+        return member.status in ("creator", "administrator")
+    except Exception:
+        return False
+
+
+@dp.message(Command("tickets_post"))
+async def create_tickets_post(message: Message):
+    if message.chat.type == "private" or not message.from_user:
+        await message.answer("Эту команду нужно отправить в общем чате лагеря.")
+        return
+    if not await is_admin(message):
+        return
+
+    # Удаляем команду, чтобы участники видели только публичный счётчик.
+    try:
+        await message.delete()
+    except Exception:
+        await message.answer(
+            "Не удалось скрыть команду. Дай боту право удалять сообщения и повтори."
+        )
+        return
+
+    sent = await bot.send_message(message.chat.id, format_tickets(48, 100))
+    with db() as conn:
+        conn.execute(
+            """INSERT INTO tickets_counter (id, chat_id, message_id, remaining, total)
+               VALUES (1, ?, ?, 48, 100)
+               ON CONFLICT(id) DO UPDATE SET
+               chat_id = excluded.chat_id,
+               message_id = excluded.message_id,
+               remaining = 48,
+               total = 100""",
+            (message.chat.id, sent.message_id)
+        )
+
+
+@dp.message(Command("tickets"))
+async def set_tickets_remaining(message: Message):
+    if message.chat.type != "private" or not message.from_user:
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Использование: /tickets 48")
+        return
+
+    row = await get_tickets_config()
+    if not row:
+        await message.answer("Сначала создай публичный счётчик командой /tickets_post в общем чате.")
+        return
+    if not await is_group_admin(row["chat_id"], message.from_user.id):
+        await message.answer("Изменять количество путёвок могут только администраторы лагерного чата.")
+        return
+
+    remaining = int(parts[1])
+    if remaining < 0 or remaining > row["total"]:
+        await message.answer(f"Введи число от 0 до {row['total']}.")
+        return
+
+    try:
+        await bot.edit_message_text(
+            format_tickets(remaining, row["total"]),
+            chat_id=row["chat_id"],
+            message_id=row["message_id"]
+        )
+    except Exception as exc:
+        logger.warning("Tickets message update failed: %s", exc)
+        await message.answer("Не удалось обновить публичный счётчик. Возможно, сообщение удалено.")
+        return
+
+    with db() as conn:
+        conn.execute("UPDATE tickets_counter SET remaining = ? WHERE id = 1", (remaining,))
+    await message.answer(f"Готово. Осталось {remaining} из {row['total']} путёвок.")
+
+
+@dp.message(Command("tickets_total"))
+async def set_tickets_total(message: Message):
+    if message.chat.type != "private" or not message.from_user:
+        return
+    parts = (message.text or "").split(maxsplit=1)
+    if len(parts) != 2 or not parts[1].isdigit():
+        await message.answer("Использование: /tickets_total 100")
+        return
+
+    row = await get_tickets_config()
+    if not row:
+        await message.answer("Сначала создай публичный счётчик командой /tickets_post в общем чате.")
+        return
+    if not await is_group_admin(row["chat_id"], message.from_user.id):
+        await message.answer("Изменять вместимость могут только администраторы лагерного чата.")
+        return
+
+    total = int(parts[1])
+    if total < 1 or total < row["remaining"]:
+        await message.answer(
+            f"Общая вместимость должна быть не меньше остатка ({row['remaining']}) и минимум 1."
+        )
+        return
+
+    try:
+        await bot.edit_message_text(
+            format_tickets(row["remaining"], total),
+            chat_id=row["chat_id"],
+            message_id=row["message_id"]
+        )
+    except Exception as exc:
+        logger.warning("Tickets total update failed: %s", exc)
+        await message.answer("Не удалось обновить публичный счётчик. Возможно, сообщение удалено.")
+        return
+
+    with db() as conn:
+        conn.execute("UPDATE tickets_counter SET total = ? WHERE id = 1", (total,))
+    await message.answer(f"Готово. Вместимость теперь {total} путёвок.")
+
+
+@dp.message(Command("tickets_status"))
+async def tickets_status(message: Message):
+    if message.chat.type != "private" or not message.from_user:
+        return
+    row = await get_tickets_config()
+    if not row:
+        await message.answer("Публичный счётчик ещё не создан.")
+        return
+    if not await is_group_admin(row["chat_id"], message.from_user.id):
+        await message.answer("Эта команда доступна только администраторам лагерного чата.")
+        return
+    await message.answer(format_tickets(row["remaining"], row["total"]))
 
 
 @dp.message(Command("list"))
