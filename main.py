@@ -97,12 +97,27 @@ def format_countdown(title: str, target: datetime) -> str:
 
 
 async def is_admin(message: Message) -> bool:
-    if not message.from_user:
-        return False
     try:
+        # В канале команды приходят как channel_post: Telegram уже гарантирует,
+        # что публикацию создал администратор канала. Дополнительно проверяем
+        # права самого бота на публикацию и редактирование сообщений.
+        if message.chat.type == "channel":
+            if not message.sender_chat or message.sender_chat.id != message.chat.id:
+                return False
+            me = await bot.get_me()
+            member = await bot.get_chat_member(message.chat.id, me.id)
+            return (
+                member.status == "administrator"
+                and getattr(member, "can_post_messages", False)
+                and getattr(member, "can_edit_messages", False)
+            )
+
+        if not message.from_user:
+            return False
         member = await bot.get_chat_member(message.chat.id, message.from_user.id)
         return member.status in ("creator", "administrator")
     except Exception:
+        logger.exception("Admin check failed for chat %s", message.chat.id)
         return False
 
 
@@ -110,7 +125,7 @@ async def is_admin(message: Message) -> bool:
 async def start(message: Message):
     await message.answer(
         "Привет! Я бот обратного отсчёта. ⏳\n\n"
-        "Добавь меня в групповой чат и используй команду:\n"
+        "Добавь меня в группу или канал и используй команду:\n"
         "<code>/countdown Название события | 2026-12-15 12:00</code>\n\n"
         "Время указывается по Москве (МСК).\n"
         "/list — активные отсчёты\n"
@@ -125,9 +140,10 @@ async def help_command(message: Message):
 
 
 @dp.message(Command("countdown"))
+@dp.channel_post(Command("countdown"))
 async def create_countdown(message: Message):
     if message.chat.type == "private":
-        await message.answer("Добавь меня в групповой чат, чтобы создать там отсчёт.")
+        await message.answer("Добавь меня в группу или канал, чтобы создать там отсчёт.")
         return
     if not await is_admin(message):
         await message.reply("Создавать отсчёты могут только администраторы чата.")
@@ -200,8 +216,9 @@ async def is_group_admin(chat_id: int, user_id: int) -> bool:
 
 
 @dp.message(Command("tickets_post"))
+@dp.channel_post(Command("tickets_post"))
 async def create_tickets_post(message: Message):
-    if message.chat.type == "private" or not message.from_user:
+    if message.chat.type == "private" or (not message.from_user and message.chat.type != "channel"):
         await message.answer("Эту команду нужно отправить в общем чате лагеря.")
         return
     if not await is_admin(message):
@@ -370,6 +387,7 @@ async def tickets_status(message: Message):
 
 
 @dp.message(Command("list"))
+@dp.channel_post(Command("list"))
 async def list_countdowns(message: Message):
     with db() as conn:
         rows = conn.execute(
@@ -388,9 +406,10 @@ async def list_countdowns(message: Message):
 
 
 @dp.message(Command("stop"))
+@dp.channel_post(Command("stop"))
 async def stop_countdown(message: Message):
     if message.chat.type == "private":
-        await message.answer("Эту команду нужно использовать в групповом чате.")
+        await message.answer("Эту команду нужно использовать в группе или канале.")
         return
     if not await is_admin(message):
         await message.reply("Останавливать отсчёты могут только администраторы чата.")
