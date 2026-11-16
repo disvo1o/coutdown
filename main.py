@@ -79,7 +79,7 @@ def format_countdown(title: str, target: datetime) -> str:
 
     safe_title = html.escape(title)
     return (
-        f"<b>{safe_title}</b>\\n\\n"
+        f"<b>{safe_title}</b>\n\n"
         f"{russian_plural(days, ('день', 'дня', 'дней'))} "
         f"{russian_plural(hours, ('час', 'часа', 'часов'))} "
         f"{russian_plural(minutes, ('минута', 'минуты', 'минут'))} "
